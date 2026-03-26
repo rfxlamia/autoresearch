@@ -19,6 +19,9 @@ import torch.nn.functional as F
 
 from kernels import get_kernel
 cap = torch.cuda.get_device_capability()
+# Turing/T4 doesn't support bfloat16 natively, use float16
+DEFAULT_DTYPE = torch.bfloat16 if cap >= (8, 0) else torch.float16
+
 # varunneal's FA3 is Hopper only, use kernels-community on non-Hopper GPUs
 repo = "varunneal/flash-attention-3" if cap == (9, 0) else "kernels-community/flash-attn3"
 try:
@@ -36,12 +39,12 @@ from prepare import MAX_SEQ_LEN, TIME_BUDGET, Tokenizer, make_dataloader, evalua
 
 @dataclass
 class GPTConfig:
-    sequence_len: int = 1024 # Reduced from 2048
+    sequence_len: int = 2048 # Restored to MAX_SEQ_LEN
     vocab_size: int = 8192
-    n_layer: int = 4 # Reduced from 12/8
+    n_layer: int = 4 # Reduced for T4
     n_head: int = 4
     n_kv_head: int = 4
-    n_embd: int = 256 # Reduced from 768/512
+    n_embd: int = 256 # Reduced for T4
     window_pattern: str = "SSSL"
 
 
@@ -188,10 +191,10 @@ class GPT(nn.Module):
         head_dim = self.config.n_embd // self.config.n_head
         cos, sin = self._precompute_rotary_embeddings(self.rotary_seq_len, head_dim)
         self.cos, self.sin = cos, sin
-        # Cast embeddings to bf16
-        self.transformer.wte.to(dtype=torch.bfloat16)
+        # Cast embeddings to the default dtype
+        self.transformer.wte.to(dtype=DEFAULT_DTYPE)
         for ve in self.value_embeds.values():
-            ve.to(dtype=torch.bfloat16)
+            ve.to(dtype=DEFAULT_DTYPE)
 
     def _precompute_rotary_embeddings(self, seq_len, head_dim, base=10000, device=None):
         if device is None:
@@ -201,7 +204,7 @@ class GPT(nn.Module):
         t = torch.arange(seq_len, dtype=torch.float32, device=device)
         freqs = torch.outer(t, inv_freq)
         cos, sin = freqs.cos(), freqs.sin()
-        cos, sin = cos.bfloat16(), sin.bfloat16()
+        cos, sin = cos.to(DEFAULT_DTYPE), sin.to(DEFAULT_DTYPE)
         cos, sin = cos[None, :, None, :], sin[None, :, None, :]
         return cos, sin
 
@@ -334,7 +337,7 @@ def muon_step_fused(stacked_grads, stacked_params, momentum_buffer, second_momen
     momentum_buffer.lerp_(stacked_grads, 1 - momentum)
     g = stacked_grads.lerp_(momentum_buffer, momentum)
     # Polar express orthogonalization
-    X = g.bfloat16()
+    X = g.to(DEFAULT_DTYPE)
     X = X / (X.norm(dim=(-2, -1), keepdim=True) * 1.02 + 1e-6)
     if g.size(-2) > g.size(-1):
         for a, b, c in polar_express_coeffs[:ns_steps]:
@@ -472,7 +475,7 @@ torch.manual_seed(42)
 torch.cuda.manual_seed(42)
 torch.set_float32_matmul_precision("high")
 device = torch.device("cuda")
-autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16)
+autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=DEFAULT_DTYPE)
 H100_BF16_PEAK_FLOPS = 989.5e12
 
 tokenizer = Tokenizer.from_directory()
