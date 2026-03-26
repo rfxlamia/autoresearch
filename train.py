@@ -36,12 +36,12 @@ from prepare import MAX_SEQ_LEN, TIME_BUDGET, Tokenizer, make_dataloader, evalua
 
 @dataclass
 class GPTConfig:
-    sequence_len: int = 2048
-    vocab_size: int = 32768
-    n_layer: int = 12
-    n_head: int = 6
-    n_kv_head: int = 6
-    n_embd: int = 768
+    sequence_len: int = 1024 # Reduced from 2048
+    vocab_size: int = 8192
+    n_layer: int = 4 # Reduced from 12/8
+    n_head: int = 4
+    n_kv_head: int = 4
+    n_embd: int = 256 # Reduced from 768/512
     window_pattern: str = "SSSL"
 
 
@@ -448,7 +448,7 @@ HEAD_DIM = 128          # target head dimension for attention
 WINDOW_PATTERN = "SSSL" # sliding window pattern: L=full, S=half context
 
 # Optimization
-TOTAL_BATCH_SIZE = 2**19 # ~524K tokens per optimizer step
+TOTAL_BATCH_SIZE = 2**14 # Reduced from 2**19 to fit in T4 VRAM
 EMBEDDING_LR = 0.6      # learning rate for token embeddings (Adam)
 UNEMBEDDING_LR = 0.004  # learning rate for lm_head (Adam)
 MATRIX_LR = 0.04        # learning rate for matrix parameters (Muon)
